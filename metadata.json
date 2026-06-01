@@ -1,0 +1,6 @@
+{
+  "name": "FinChat",
+  "description": "사회초년생을 위한 AI 기반 개인화 금융 상담 웹앱 — 나만의 딸깍 금융상담원",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
