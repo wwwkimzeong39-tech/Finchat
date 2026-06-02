@@ -109,7 +109,7 @@ async function callGeminiClient(
 
   const payload = {
     contents: formattedContents,
-    systemInstruction: {
+    system_instruction: {
       parts: [{ text: chatSystemPrompt }]
     },
     generationConfig: {
