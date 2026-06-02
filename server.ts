@@ -94,42 +94,58 @@ app.post("/api/chat", async (req, res) => {
       }
     }
 
+    // Gemini API strictly requires that conversational history starts with a 'user' message.
+    // Clean history from any leading greeting or instructions injected as 'model' message.
+    while (formattedContents.length > 0 && formattedContents[0].role !== "user") {
+      formattedContents.shift();
+    }
+
     // Append the last user message
     formattedContents.push({
       role: "user",
       parts: [{ text: message }],
     });
 
-    // Try calling Gemini 1.5 Flash as primary, fallback to Gemini 1.5 Flash 8B if rate-limited or failed, and return standard delay message if both fail
+    // Try calling Gemini 2.0 Flash as primary, fallback to Gemini 1.5 Flash if rate-limited or failed
     let reply = "";
-    let modelUsed = "gemini-1.5-flash";
+    let modelUsed = "gemini-2.0-flash";
 
     try {
       const geminiRes = await aiClient.models.generateContent({
-        model: "gemini-1.5-flash",
+        model: "gemini-2.0-flash",
         contents: formattedContents,
         config: {
           systemInstruction: chatSystemPrompt,
           temperature: 0.7,
-          maxOutputTokens: 800,
+          maxOutputTokens: 1024,
         },
       });
-      reply = geminiRes.text || "";
+      const finishReason = geminiRes.candidates?.[0]?.finishReason;
+      if (typeof finishReason === "string" && finishReason.toUpperCase() === "MAX_TOKENS") {
+        reply = "응답이 완료되지 않았습니다. 다시 시도해 주세요.";
+      } else {
+        reply = geminiRes.text || "";
+      }
     } catch (firstErr: any) {
-      console.warn("Primary model gemini-1.5-flash failed, trying fallback model gemini-1.5-flash-8b...", firstErr.message || firstErr);
+      console.warn("Primary model gemini-2.0-flash failed, trying fallback model gemini-1.5-flash...", firstErr.message || firstErr);
       
       try {
-        modelUsed = "gemini-1.5-flash-8b";
+        modelUsed = "gemini-1.5-flash";
         const fallbackRes = await aiClient.models.generateContent({
-          model: "gemini-1.5-flash-8b",
+          model: "gemini-1.5-flash",
           contents: formattedContents,
           config: {
             systemInstruction: chatSystemPrompt,
             temperature: 0.7,
-            maxOutputTokens: 800,
+            maxOutputTokens: 1024,
           },
         });
-        reply = fallbackRes.text || "";
+        const finishReason = fallbackRes.candidates?.[0]?.finishReason;
+        if (typeof finishReason === "string" && finishReason.toUpperCase() === "MAX_TOKENS") {
+          reply = "응답이 완료되지 않았습니다. 다시 시도해 주세요.";
+        } else {
+          reply = fallbackRes.text || "";
+        }
       } catch (secondErr: any) {
         console.error("All Gemini API models exhausted or hit quota limit. Returning standard error message.", secondErr.message || secondErr);
         reply = "현재 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요. 😊";

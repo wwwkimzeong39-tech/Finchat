@@ -35,6 +35,143 @@ import {
   type ChatMessage
 } from "./types";
 
+// System instruction generator (client-side)
+function getSystemPrompt(userType: string): string {
+  const typeLabel: Record<string, string> = {
+    A: "안정형 투자자 🛡️ — 원금 보존 최우선, 예금·적금 선호",
+    B: "균형형 투자자 ⚖️ — 안정과 성장 균형, 분산 투자 선호",
+    C: "성장형 투자자 🚀 — 수익 추구, 리스크 감수 가능"
+  };
+  
+  const selectedLabel = typeLabel[userType] || "미정 (일반적인 사회초년생)";
+  
+  return `당신은 사회초년생을 위한 친절하고 전문적인 금융 상담 AI 비서 'FinChat (핀챗)'입니다.
+
+## 역할과 원칙
+- 사회초년생의 눈높이에 맞추어 친절하고 정중하면서도 신뢰감 있게 설명합니다. (기본 존댓말 사용)
+- 특정 금융기관의 사적인 이윤을 추구하는 특정 명칭 및 금융상품을 직접 추천하거나 권유하지 마십시오. 오직 세제 혜택이나 구조 등 공공 데이터나 공인된 제도 기준의 유용한 정보만을 객관적으로 전달합니다.
+- 전문 용어(예: ISA, IRP, ETF, 주택청약 등)가 대화 중에 처음으로 언급되거나 주요하게 등장할 때는 사용자 친화적으로 괄호 안에 구체적인 한글 뜻풀이를 병기하여 도움을 주어야 합니다.
+  예시: "IRP(개인형 퇴직연금 — 세금 절약 혜택을 누리며 은퇴 및 노후 자금을 적립할 수 있는 국가 지정 계좌)"
+- 답변이 과도하게 길어지지 않도록 주의하고, 핵심 가이드를 3~5줄 내외의 컴팩트한 단락들로 구성하십시오.
+- 특정 이율이나 이자 한도, 소득 요건 등 고정 수치성 정보를 서술할 경우엔 법적인 변동 소지가 있음을 알리기 위해 반드시 "참고용 수치" 혹은 "변동 가능"임을 사전에 안내하십시오.
+
+## 현재 대화 중인 사용자 금융 가치관 유형
+- 유형: ${selectedLabel}
+${userType === "A" ? "- [가이드라인] 원금 보존과 자본 안정성을 최우선시합니다. 위험이 수반되는 직접 투자보단 적금, 예금, 주택청약, 나라 보증 원금보장형 세제 혜택 ISA(개인종합자산관리계좌) 등의 초안정성 금융 습관을 추천하고 응원하세요." : ""}
+${userType === "B" ? "- [가이드라인] 저축과 보편적인 장기 분산 투자를 병행하여 합리적인 복리 성장을 추구합니다. 저축(예적금)을 기본 안전망으로 쌓으면서 코스피/S&P500 등 안정형 지수 추종 인덱스 ETF 혼합 배치, 분산 ISA 활용 등 유연한 비율 균형 포트폴리오를 제안하십시오." : ""}
+${userType === "C" ? "- [가이드라인] 장기 자산 성장을 적극 도모하며 원금 손실 리스크 역시 합리적 한도라면 마다하지 않습니다. 일반형 ISA, 성장지향형 상장지수펀드(ETF), IRP 투자 한도 연계 세액공제 활용 등 전략적인 자산 집중 배분을 제안해 성장을 가속하도록 돕되, 불의의 비상 상황에 대처하기 위한 비상금(3-6개월치 기본비용) 저축을 꼭 먼저 구축한 후에 진입할 것을 덧붙여 상기시키십시오." : ""}
+
+## 답변 필수 꼬리말 (면책 고지)
+답변 본문 작성이 끝난 후, 줄바꿈을 2번 한 다음 꼬리글에 반드시 아래의 면책 조항을 토시 하나 틀리지 않게 추가하십시오:
+⚠ 이 내용은 금융 상품 권유가 아닌 정보 제공 목적입니다. 실제 가입 전 해당 금융기관에 확인하세요.
+
+## 금지 사항:
+- "A은행 상품만 추천합니다", "가장 유리하니 이 상품을 구입하세요" 등의 편향된 추천은 금융소비자보호법 저촉 우려가 크므로 절대 언급 마십시오.
+- 단정적인 어조로 높은 연이율 보장이나 절대적인 원금 보호 및 비정상적 수익률을 장담하여 기만감을 주지 마십시오.
+- 주민등록번호, 구체적인 자산 잔고, 비밀번호 등의 민감한 개인정보를 요구하지 마십시오.`;
+}
+
+// Client-side Gemini API Caller targeting primary gemini-2.0-flash and fallback gemini-1.5-flash
+async function callGeminiClient(
+  message: string,
+  userType: string,
+  history: Array<{ role: "user" | "model"; text: string }>
+): Promise<{ reply: string; modelUsed: string }> {
+  // Use VITE_GEMINI_API_KEY environment variable requested by the user
+  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("대화 기능 작동을 위한 VITE_GEMINI_API_KEY 환경변수가 정의되지 않았습니다. AI Studio Settings -> Secrets에서 VITE_GEMINI_API_KEY 값을 입력해 주세요.");
+  }
+
+  const formattedContents = [];
+  if (Array.isArray(history) && history.length > 0) {
+    // Keep up to 10 context loops
+    const recentHistory = history.slice(-10);
+    for (const turn of recentHistory) {
+      formattedContents.push({
+        role: turn.role === "user" ? "user" : "model",
+        parts: [{ text: turn.text }],
+      });
+    }
+  }
+
+  while (formattedContents.length > 0 && formattedContents[0].role !== "user") {
+    formattedContents.shift();
+  }
+
+  // Current turn user prompt
+  formattedContents.push({
+    role: "user",
+    parts: [{ text: message }],
+  });
+
+  const chatSystemPrompt = getSystemPrompt(userType);
+
+  const payload = {
+    contents: formattedContents,
+    systemInstruction: {
+      parts: [{ text: chatSystemPrompt }]
+    },
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 1024
+    }
+  };
+
+  const makeApiCall = async (model: string) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let messageDetail = `상태 코드 ${response.status}`;
+      try {
+        const errJson = JSON.parse(errorText);
+        if (errJson?.error?.message) {
+          messageDetail = errJson.error.message;
+        }
+      } catch (e) {}
+      throw new Error(`Gemini API 호출에 실패했습니다: ${messageDetail}`);
+    }
+
+    const resData = await response.json();
+    const candidate = resData.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+
+    if (typeof finishReason === "string" && finishReason.toUpperCase() === "MAX_TOKENS") {
+      return "응답이 완료되지 않았습니다. 다시 시도해 주세요.";
+    }
+
+    const replyText = candidate?.content?.parts?.[0]?.text || "";
+    if (!replyText) {
+      throw new Error("Gemini로부터 빈 응답 결과가 수신되었습니다.");
+    }
+    return replyText;
+  };
+
+  try {
+    // Primary: gemini-2.0-flash
+    const reply = await makeApiCall("gemini-2.0-flash");
+    return { reply, modelUsed: "gemini-2.0-flash" };
+  } catch (err: any) {
+    console.warn("Primary model gemini-2.0-flash fail, attempting fallback gemini-1.5-flash:", err.message || err);
+    try {
+      // Fallback: gemini-1.5-flash
+      const reply = await makeApiCall("gemini-1.5-flash");
+      return { reply, modelUsed: "gemini-1.5-flash" };
+    } catch (fallbackErr: any) {
+      console.error("All client-side models exhausted or credential err:", fallbackErr.message || fallbackErr);
+      throw new Error(fallbackErr.message || "금융 상담 AI를 호출하는 도중 오류가 발생했습니다. 잠시 후 상단 새로고침 후 다시 시도해 주세요.");
+    }
+  }
+}
+
 export default function App() {
   // Helper to read from sessionStorage safely
   const getSessionValue = <T,>(key: string, defaultValue: T): T => {
@@ -274,7 +411,7 @@ ${detail.keywords.map(kw => `• ${kw} (${TERM_DICTIONARY[kw] || "금융 기본 
     navigateTo("chat");
   };
 
-  // Safe client-side API Caller backboned by express API proxy
+  // Direct client-side Gemini API Caller
   const handleSendMessage = async (e?: FormEvent) => {
     if (e) e.preventDefault();
     if (!inputText.trim() || isAiTyping || !userType) return;
@@ -296,31 +433,14 @@ ${detail.keywords.map(kw => `• ${kw} (${TERM_DICTIONARY[kw] || "금융 기본 
     setIsAiTyping(true);
 
     try {
-      // Map React ChatMessage history structure to light text histories payload for node server
+      // Map React ChatMessage history structure to light text histories payload
       const chatHistoryForBackend = updatedMessages.slice(0, -1).map(m => ({
         role: m.role,
         text: m.text
       }));
 
-      // Call proxy server endpoint
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: userMsgText,
-          userType: userType,
-          history: chatHistoryForBackend
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "메시지 연결에 실패했습니다.");
-      }
-
-      const result = await response.json();
+      // Call Gemini API directly (client-side)
+      const result = await callGeminiClient(userMsgText, userType, chatHistoryForBackend);
       
       const newModelMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
